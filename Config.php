@@ -118,7 +118,7 @@ class Config {
   }
 
   /**
-   * Get the configuration from the root package.
+   * Get the configured list of directories to remove from the root package.
    *
    * This is stored in composer.json extra:drupal-core-vendor-cleanup.
    *
@@ -126,7 +126,7 @@ class Config {
    *   An array keyed by package name. Each array value is an array of paths,
    *   relative to the package.
    */
-  protected function getPluginConfig() {
+  public function getAllCleanupPaths() {
     if ($this->configData) {
       return $this->configData;
     }
@@ -164,7 +164,7 @@ class Config {
    */
   public function getPathsForPackage($package) {
     $paths = [];
-    $config = $this->getPluginConfig();
+    $config = $this->getAllCleanupPaths();
     if (isset($config[$package])) {
       $paths = $config[$package];
     }
@@ -184,9 +184,13 @@ class Config {
 
   /**
    * If there is no configuration in the root package, it is unconfigured.
+   *
+   * @return bool
+   *   TRUE if the root package does not have a list of packages with
+   *   directories to clean.
    */
   public function isUnconfigured() {
-    return empty($this->getPluginConfig());
+    return empty($this->getAllCleanupPaths());
   }
 
 }

@@ -37,6 +37,13 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
   protected $config;
 
   /**
+   * List of projects already cleaned
+   *
+   * @var string[]
+   */
+  protected $projectsAlreadyCleaned = [];
+
+  /**
    * {@inheritdoc}
    */
   public function activate(Composer $composer, IOInterface $io) {
@@ -60,13 +67,13 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
   }
 
   /**
-   * Post command event callback.
+   * POST_UPDATE_CMD and POST_INSTALL_CMD event handler.
    *
    * @param \Composer\Script\Event $event
    *   The Composer event.
    */
   public function postCmd(Event $event) {
-    $this->io->write(sprintf("Post command"));
+    $this->cleanAll($this->composer->getConfig()->get('vendor-dir'));
   }
 
   /**
@@ -75,10 +82,10 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
    * @param \Composer\Installer\PackageEvent $event
    */
   public function onPostPackageInstall(PackageEvent $event) {
-    print "post package install for vendor cleanup plugin ===============\n";
     /** @var \Composer\Package\CompletePackage $package */
     $package = $event->getOperation()->getPackage();
-    $this->cleanPackage($this->composer->getConfig()->get('vendor-dir'), $package);
+    $package_name = $package->getName();
+    $this->cleanPackage($this->composer->getConfig()->get('vendor-dir'), $package_name);
   }
 
   /**
@@ -87,47 +94,82 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
    * @param \Composer\Installer\PackageEvent $event
    */
   public function onPostPackageUpdate(PackageEvent $event) {
-    print "post package update for vendor cleanup plugin ===============\n";
     /** @var \Composer\Package\CompletePackage $package */
     $package = $event->getOperation()->getTargetPackage();
-    $this->cleanPackage($this->composer->getConfig()->get('vendor-dir'), $package);
+    $package_name = $package->getName();
+    $this->cleanPackage($this->composer->getConfig()->get('vendor-dir'), $package_name);
   }
 
   /**
-   * Clean out the package.
+   * Clean all configured directories.
    *
-   * @param \Composer\Package\CompletePackageInterface $package
+   * @param string $vendor_dir
+   *   Path to vendor directory
    */
-  public function cleanPackage($vendor_dir, CompletePackageInterface $package) {
-    $package_name = $package->getName();
-    $this->io->write(sprintf("Clean %s", $package_name));
+  public function cleanAll($vendor_dir) {
+    $paths_for_package = $this->config->getAllCleanupPaths();
+    foreach ($paths_for_package as $package_name => $paths_for_package) {
+      $this->cleanPathsForPackage($vendor_dir, $package_name, $paths_for_package);
+    }
+  }
+
+  /**
+   * Sanitize one package.
+   *
+   * @param string $vendor_dir
+   *   Path to vendor directory
+   * @param string $package_name
+   *   Name of the package to clean
+   */
+  public function cleanPackage($vendor_dir, $package_name) {
     $paths_for_package = $this->config->getPathsForPackage($package_name);
     if ($paths_for_package) {
-      $package_dir = $vendor_dir . '/' . $package_name;
-      if (is_dir($package_dir)) {
-        $this->io->write(sprintf("    Package cleanup for <comment>%s</comment>", $package_name));
-        $fs = new Filesystem();
-        foreach ($paths_for_package as $cleanup_item) {
-          $cleanup_path = $package_dir . '/' . $cleanup_item;
-          if (is_dir($cleanup_path)) {
-            if ($fs->removeDirectory($cleanup_path)) {
-              $this->io->write(sprintf("      <info>Removing directory '%s'</info>", $cleanup_item));
-            }
-            else {
-              // Always display a message if this fails as it means something
-              // has gone wrong. Therefore the message has to include the
-              // package name as the first informational message might not
-              // exist.
-              $this->io->write(sprintf("      <error>Failure removing directory '%s'</error> in package <comment>%s</comment>.", $cleanup_item, $package_name), TRUE, IOInterface::NORMAL);
-            }
+      $this->cleanPathsForPackage($vendor_dir, $package_name, $paths_for_package);
+    }
+  }
+
+  /**
+   * Sanitize the installed directories for a named package.
+   *
+   * @param string $vendor_dir n
+   *   Path to vendor directory.
+   * @param string $package_name
+   *   Name of package to sanitize.
+   * @param string $paths_for_package
+   *   List of directories in $package_name to remove
+   * @return type
+   */
+  protected function cleanPathsForPackage($vendor_dir, $package_name, $paths_for_package) {
+    // Don't clean the same project more than once per invocation.
+    if (isset($this->projectsAlreadyCleaned[$package_name])) {
+      $this->io->write(sprintf("    Already sanitized directories in <comment>%s</comment>", $package_name));
+      return;
+    }
+    $this->projectsAlreadyCleaned[$package_name] = true;
+
+    $package_dir = $vendor_dir . '/' . $package_name;
+    if (is_dir($package_dir)) {
+      $this->io->write(sprintf("    Sanitizing directories in <comment>%s</comment>", $package_name));
+      $fs = new Filesystem();
+      foreach ($paths_for_package as $cleanup_item) {
+        $cleanup_path = $package_dir . '/' . $cleanup_item;
+        if (is_dir($cleanup_path)) {
+          if ($fs->removeDirectory($cleanup_path)) {
+            $this->io->write(sprintf("      <info>Removing directory '%s'</info>", $cleanup_item), TRUE, IOInterface::VERBOSE);
           }
           else {
-            // If the package has changed or the --prefer-dist version does not
-            // include the directory. This is not an error.
-            $this->io->write(sprintf("      <comment>Directory '%s' does not exist.</comment>", $cleanup_path));
+            // Always display a message if this fails as it means something
+            // has gone wrong. Therefore the message has to include the
+            // package name as the first informational message might not
+            // exist.
+            $this->io->write(sprintf("      <error>Failure removing directory '%s'</error> in package <comment>%s</comment>.", $cleanup_item, $package_name), TRUE, IOInterface::NORMAL);
           }
         }
-        $this->io->write('');
+        else {
+          // If the package has changed or the --prefer-dist version does not
+          // include the directory. This is not an error.
+          $this->io->write(sprintf("      <comment>Directory '%s' does not exist.</comment>", $cleanup_path), TRUE, IOInterface::VERY_VERBOSE);
+        }
       }
     }
   }
