@@ -10,6 +10,8 @@ use Composer\Package\CompletePackageInterface;
 use Composer\Plugin\PluginInterface;
 use Composer\Script\ScriptEvents;
 use Composer\Util\Filesystem;
+use Composer\Script\Event;
+use Composer\Installer\PackageEvents;
 
 class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
 
@@ -50,9 +52,21 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
    */
   public static function getSubscribedEvents() {
     return [
-      ScriptEvents::POST_PACKAGE_INSTALL => 'onPostPackageInstall',
-      ScriptEvents::POST_PACKAGE_UPDATE => 'onPostPackageUpdate',
+      ScriptEvents::POST_UPDATE_CMD => 'postCmd',
+      ScriptEvents::POST_INSTALL_CMD => 'postCmd',
+      PackageEvents::POST_PACKAGE_INSTALL => 'onPostPackageInstall',
+      PackageEvents::POST_PACKAGE_UPDATE => 'onPostPackageUpdate',
     ];
+  }
+
+  /**
+   * Post command event callback.
+   *
+   * @param \Composer\Script\Event $event
+   *   The Composer event.
+   */
+  public function postCmd(Event $event) {
+    $this->io->write(sprintf("Post command"));
   }
 
   /**
@@ -61,6 +75,7 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
    * @param \Composer\Installer\PackageEvent $event
    */
   public function onPostPackageInstall(PackageEvent $event) {
+    print "post package install for vendor cleanup plugin ===============\n";
     /** @var \Composer\Package\CompletePackage $package */
     $package = $event->getOperation()->getPackage();
     $this->cleanPackage($this->composer->getConfig()->get('vendor-dir'), $package);
@@ -72,6 +87,7 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
    * @param \Composer\Installer\PackageEvent $event
    */
   public function onPostPackageUpdate(PackageEvent $event) {
+    print "post package update for vendor cleanup plugin ===============\n";
     /** @var \Composer\Package\CompletePackage $package */
     $package = $event->getOperation()->getTargetPackage();
     $this->cleanPackage($this->composer->getConfig()->get('vendor-dir'), $package);
@@ -84,17 +100,18 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
    */
   public function cleanPackage($vendor_dir, CompletePackageInterface $package) {
     $package_name = $package->getName();
+    $this->io->write(sprintf("Clean %s", $package_name));
     $paths_for_package = $this->config->getPathsForPackage($package_name);
     if ($paths_for_package) {
       $package_dir = $vendor_dir . '/' . $package_name;
       if (is_dir($package_dir)) {
-        $this->io->write(sprintf("    Package cleanup for <comment>%s</comment>", $package_name), TRUE, IOInterface::VERBOSE);
+        $this->io->write(sprintf("    Package cleanup for <comment>%s</comment>", $package_name));
         $fs = new Filesystem();
         foreach ($paths_for_package as $cleanup_item) {
           $cleanup_path = $package_dir . '/' . $cleanup_item;
           if (is_dir($cleanup_path)) {
             if ($fs->removeDirectory($cleanup_path)) {
-              $this->io->write(sprintf("      <info>Removing directory '%s'</info>", $cleanup_item), TRUE, IOInterface::VERY_VERBOSE);
+              $this->io->write(sprintf("      <info>Removing directory '%s'</info>", $cleanup_item));
             }
             else {
               // Always display a message if this fails as it means something
@@ -107,10 +124,10 @@ class VendorCleanupPlugin implements PluginInterface, EventSubscriberInterface {
           else {
             // If the package has changed or the --prefer-dist version does not
             // include the directory. This is not an error.
-            $this->io->write(sprintf("      <comment>Directory '%s' does not exist.</comment>", $cleanup_path), TRUE, IOInterface::VERBOSE);
+            $this->io->write(sprintf("      <comment>Directory '%s' does not exist.</comment>", $cleanup_path));
           }
         }
-        $this->io->write('', TRUE, IOInterface::VERBOSE);
+        $this->io->write('');
       }
     }
   }
